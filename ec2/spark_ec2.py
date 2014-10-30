@@ -162,6 +162,15 @@ def parse_args():
     parser.add_option(
         "--copy-aws-credentials", action="store_true", default=False,
         help="Add AWS credentials to hadoop configuration to allow Spark to access S3")
+    parser.add_option(
+        "--main-class", type="string", default="",
+        help="Main class name of application jar for submit action")
+    parser.add_option(
+        "--app-jar", type="string", default="",
+        help="Application jar for submit action")
+    parser.add_option(
+        "--app-args", type="string", default="",
+        help="Arguments of application jar for submit action")
 
     (opts, args) = parser.parse_args()
     if len(args) != 2:
@@ -1082,6 +1091,21 @@ def real_main():
             opts=opts
         )
         setup_cluster(conn, master_nodes, slave_nodes, opts, False)
+
+    elif action == "submit":
+        (master_nodes, slave_nodes) = get_existing_cluster(conn, opts, cluster_name)
+        master = master_nodes[0].public_dns_name
+        slave = slave_nodes[0].public_dns_name
+        print "Submitting " + opts.app_jar + " to master " + master + "..."
+        subprocess.check_call(['scp', '-i', opts.identity_file, opts.app_jar, '%s@%s:' % (opts.user, master)])
+        output_dir = '/tmp'
+        output_file = 'result.out'
+        cpu_core_num = int(ssh_read(slave, opts, 'nproc'))
+        slave_num = len(slave_nodes)
+        submit_command = """spark/bin/spark-submit --master spark://%s:%d --class %s --executor-cores %d --num-executors %d %s %s > %s""" % (str(master), 7077, opts.main_class, cpu_core_num, slave_num, os.path.basename(opts.app_jar), opts.app_args, output_file)
+        ssh(master, opts, submit_command)        
+        subprocess.check_call(['scp', '-i', opts.identity_file, '%s@%s:%s' % (opts.user, master, output_file), '%s/%s' % (output_dir, output_file)])
+        print "Done. Result output file: %s/%s" % (output_dir, output_file)
 
     else:
         print >> stderr, "Invalid action: %s" % action
